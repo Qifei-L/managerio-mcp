@@ -99,13 +99,21 @@ Use this workflow when asked to create a company/business/file in Manager and co
 
 ## Business summaries and line descriptions
 
-Keep business-facing text readable in the user's chosen language. For imports, use a short Narration or document-level Description that states the transaction's purpose and relevant period. Put each line's useful source memo, counterparty and service period in its native line-description field; remove repetition and obvious spelling noise without changing meaning. Do not invent parties, invoice numbers, dates or purposes. For mixed-purpose journals, summarize the distinct purposes once rather than copying every line into the header. For example: `Office rent and rental income — January 2025`; a line can read `Office rental fee — Landlord — January 2025`.
+Use concise plain English for newly authored bookkeeping account labels, Narration, document summaries and line descriptions. Preserve exact legal identities, reference numbers and other source identifiers; do not translate or alter them to satisfy this language convention. Describe only evidenced purpose and period, without inventing parties, invoice numbers, dates or purposes. For mixed-purpose journals, a new header may summarize the distinct purposes once, for example `Office rent and rental income, January 2025`.
+
+Keep original source memos, descriptions and other evidence intact in the source/audit record. When importing existing source text as detail, preserve it verbatim; any newly authored English summary must be separate and clearly identified. This writing convention does not authorize translation, spelling cleanup, deduplication or rewriting of source details, nor mass renaming or rewriting of existing records. Existing text may be repaired only within a specifically authorized edit; do not expand a bookkeeping or import request into a description-cleanup batch.
 
 Keep source file names, spreadsheet row numbers, raw JSON, account-mapping diagnostics and import logs in the audit record or an explicitly supported dedicated field. Do not paste them into Narration or Description. Keep any established unique import Reference unchanged for duplicate detection, and retain the original business reference in the audit mapping or supported reference field. A reconstructed adjustment must remain clearly identified as a reconstruction in its short business summary.
 
 Use the actual native field names for each resource. A displayed Description is not necessarily the writable form field: journals distinguish Narration from line descriptions. Journal `Lines[].LineDescription` with `HasLineDescription:true` was verified in a live description-only update on Manager 26.10.10.0. The form retains Narration separately; the native GL's Description can show the line text when present. Confirm field persistence and the relevant returned line text on the first authorized document in the target version before repeating the change across a batch. If a field is discarded, reconcile that document and report the limitation; do not claim the descriptions were fixed.
 
 For an authorized description-only repair, read each exact document and its current hash, retain a before/after audit record, and change only the requested text plus any verified flag needed to display it. Arrays replace in full: preserve every existing line, its order, posting accounts, debit/credit amounts and other stored fields. Preserve document date, currency, tax choices and Reference. Apply in bounded batches, checkpoint verified results, and reconcile uncertain writes before continuing. Verify both the cleaned text and unchanged accounting fields; finish by comparing the complete ledger's dates, references, accounts and amounts with the pre-edit snapshot.
+
+## Preserve original export details
+
+- Export detail rows with their original contents, order, amounts, currencies, references and descriptions intact. Do not translate, merge, deduplicate, clean up spelling or rewrite detail rows without explicit authorization for that specific transformation. The plain-English writing convention above never overrides raw-detail preservation.
+- Keep derived summaries, grouping and calculations separate from raw details. Put optional English display text or other authorized transformations in clearly labeled separate columns or sheets; never replace original detail values. Maintain traceability to each original row and keep the source evidence unchanged.
+- State the selected company, period, filters, source and completeness. If a field is absent, ambiguous or not fully delivered, disclose that limitation rather than inventing, normalizing or silently dropping it. A grouped result is a summary, not an unchanged detail export. These instructions do not authorize editing business records.
 
 ## Invoices, quotes and orders
 
@@ -181,6 +189,12 @@ For compact results, supply generic `group_by` (native scalar field names, plus 
 ## Chart of accounts: Manager-native workflow
 
 Excel is only an optional external bulk-data source. Never require a spreadsheet, workbook preview, download or upload to manage COA. The normal model is **Balance Sheet / Profit & Loss → Group → Account**, using native object IDs. Report membership is evidenced by the native form kind, not inferred from an account name, code range or translated label.
+
+### Explicit authorization for new accounts
+
+Creating a new COA account requires explicit user authorization for the proposed account or exact reviewed creation plan. General instructions to do bookkeeping, post transactions, import data or fix missing mappings do not implicitly authorize new accounts. First search the existing chart and reuse a verified suitable account when the authorized accounting treatment supports it. If a required account is missing, describe the proposed name/code, report/classification and parent, and obtain the missing authorization before applying any creation. Do not silently create an account, group or substitute merely to make an import succeed.
+
+Reuse current explicit approval for that exact account or reviewed plan, including execution chunks and safe resumption; do not ask repeatedly while the approved scope is unchanged. Material changes to the proposed account or plan need fresh review and authorization. A prepared preview or approval hash alone is not user approval. This Skill change is guidance for future authorized work, not permission to create accounts or edit company data now.
 
 ### Responsibility boundary
 
