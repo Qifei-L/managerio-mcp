@@ -5,6 +5,7 @@ export function recordBatchSchemas(resources, connection) {
     prepare_record_changes: { properties: { ...connection,
       changes: { type: 'array', minItems: 1, maxItems: 20, items: { type: 'object', additionalProperties: false,
         properties: { operation: { type: 'string', enum: ['update', 'delete'] }, resource: { type: 'string', enum: resources }, key: { type: 'string', format: 'uuid' }, expected_hash: { type: 'string', pattern: '^[a-f0-9]{64}$' }, fields: { type: 'object', additionalProperties: true, minProperties: 1 } }, required: ['operation', 'resource', 'key', 'expected_hash'] } },
+      guards: { type:'array', maxItems:20, items:{type:'object',additionalProperties:false,properties:{resource:{type:'string',enum:resources},key:{type:'string',format:'uuid'},expected_hash:{type:'string',pattern:'^[a-f0-9]{64}$'}},required:['resource','key','expected_hash']} },
       ledger_check: { type: 'object', additionalProperties: false, properties: {
         group_by: { type: 'array', minItems: 1, maxItems: 6, items: { type: 'string', minLength: 1, maxLength: 80 } },
         sum_fields: { type: 'array', minItems: 1, maxItems: 6, items: { type: 'string', minLength: 1, maxLength: 80 } },
@@ -53,7 +54,7 @@ export async function recordBatchCall(env,user,c,name,args,h) {
   const prefix='record-changes/'+await h.hash(user)+'/'+c.id+'/', key=prefix+(args.task_id??crypto.randomUUID())+'.json';
   const envelope={connection_id:c.id,business_name:c.name};
   const publicTask=t=>({...envelope,task_id:t.task_id,status:t.status,preview_hash:t.preview_hash,expires_at:t.expires_at,
-    changes:t.changes,ledger_check:t.ledger_check,ledger_before:t.ledger_before??null,ledger_after:t.ledger_after??null,
+    changes:t.changes,guards:t.guards??[],ledger_check:t.ledger_check,ledger_before:t.ledger_before??null,ledger_after:t.ledger_after??null,
     ledger_verification:t.ledger_verification??null,results:t.results,stop_reason:t.stop_reason??null,
     reconciliation_required:!!t.reconciliation_required,retryable:false,
     limitations:['Not atomic across Manager records. No automatic rollback or replay.','Verification proves native storage; ledger sums are generic movements, not financial statements.','Only execute changes already authorized by the user. No create/import operations.']});
@@ -72,11 +73,12 @@ export async function recordBatchCall(env,user,c,name,args,h) {
       const after=change.operation==='delete'?null:h.merge(h.body(before),change.fields);
       changes.push({...change,before,after,changed_fields:change.operation==='delete'?['(entire record)']:h.differences(before,change.fields).map(d=>d.field)});
     }
-    const task={task_id:key.slice(prefix.length,-5),connection_id:c.id,business_name:c.name,token_hash:await h.hash(c.token),
+    for(const guard of args.guards??[]){const record=await h.read(c,guard.resource,guard.key);if(await h.recordHash(record)!==guard.expected_hash)throw new h.Error('Retained/dependent record changed before preview.',409);}
+    const task={task_id:key.slice(prefix.length,-5),connection_id:c.id,business_name:c.name,token_hash:await h.hash(c.token),guards:args.guards??[],
       created_at:Date.now(),expires_at:Date.now()+24*60*60*1000,status:'prepared',changes,ledger_check:args.ledger_check??null,results:[]};
     if(task.ledger_check){task.ledger_before=await h.ledger(c,{source:'general_ledger',auto_paginate:true,group_by:task.ledger_check.group_by,sum_fields:task.ledger_check.sum_fields});
       if(!task.ledger_before.complete||!task.ledger_before.aggregation_performed)throw new h.Error('Incomplete ledger baseline; no batch was prepared.',409);}
-    task.preview_hash=await h.recordHash({connection_id:c.id,business_name:c.name,changes,ledger_check:task.ledger_check});
+    task.preview_hash=await h.recordHash({connection_id:c.id,business_name:c.name,changes,guards:task.guards,ledger_check:task.ledger_check});
     await persist(task);return publicTask(task);
   }
   const obj=await env.BUCKET.get(key);if(!obj)throw new h.Error('Record change task not found.',404);
@@ -91,6 +93,7 @@ export async function recordBatchCall(env,user,c,name,args,h) {
   const save=async()=>{etag=await persist(task,etag);};
   try{
     await h.identity(c);
+    for(const guard of task.guards??[]){const record=await h.read(c,guard.resource,guard.key);if(await h.recordHash(record)!==guard.expected_hash){task.status='stopped_conflict';task.stop_reason='Retained/dependent record changed; no writes dispatched.';await save();return publicTask(task);}}
     for(const [i,change]of task.changes.entries()){
       const current=await h.read(c,change.resource,change.key);
       if(await h.recordHash(current)!==change.expected_hash){task.status='stopped_conflict';task.stop_reason='Preflight record changed at index '+i+'; no writes dispatched.';await save();return publicTask(task);}
@@ -103,6 +106,8 @@ export async function recordBatchCall(env,user,c,name,args,h) {
   const started=Date.now();task.status='running';await save();
   for(const [index,change]of task.changes.entries()){
     if(Date.now()-started>80000){task.status='stopped_time_budget';task.stop_reason='Stopped between records at time bound. Prepare only inspected remaining changes in a new task.';await save();return publicTask(task);}
+    try{for(const guard of task.guards??[]){const record=await h.read(c,guard.resource,guard.key);if(await h.recordHash(record)!==guard.expected_hash)throw Error('changed');}}
+    catch{task.status='stopped_conflict';task.stop_reason='Retained/dependent record changed or unreadable before dispatch; remaining writes stopped.';task.reconciliation_required=task.results.length>0;await save();return publicTask(task);}
     task.results.push({index,resource:change.resource,key:change.key,operation:change.operation,status:'dispatching',dispatched_at:new Date().toISOString()});
     // A crash after this durable marker MUST NOT cause a retry.
     await save();let result;
@@ -119,6 +124,8 @@ export async function recordBatchCall(env,user,c,name,args,h) {
       if(task.ledger_check.expect_unchanged&&!task.ledger_verification.unchanged){task.status='completed_review_required';task.reconciliation_required=true;}
     }catch{task.status='completed_review_required';task.reconciliation_required=true;task.stop_reason='Writes verified but final ledger snapshot failed. Read ledger before considering further writes.';}
   }
+  try{for(const guard of task.guards??[]){const record=await h.read(c,guard.resource,guard.key);if(await h.recordHash(record)!==guard.expected_hash)throw Error('changed');}}
+  catch{task.status='completed_review_required';task.reconciliation_required=true;task.stop_reason='Retained/dependent records did not verify after writes.';}
   if(task.status==='running')task.status='completed';
   await save();return publicTask(task);
 }

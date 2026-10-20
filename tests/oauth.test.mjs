@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes, createHash } from 'node:crypto';
@@ -86,7 +87,7 @@ test('OAuth discovery, DCR, explicit owner consent, PKCE, tool access, rotation 
     assert.equal((await fetch(app.origin + '/api/connections', { headers: { Authorization: 'Bearer ' + tokens.access_token } })).status, 401);
     assert.equal((await fetch(app.origin + '/mcp-settings', { headers: { Authorization: 'Bearer ' + tokens.access_token }, redirect: 'manual' })).status, 303);
     const init = await (await mcp(app, tokens.access_token, 'initialize')).json();
-    assert.equal(init.result.serverInfo.version, '0.21.2');
+    assert.equal(init.result.serverInfo.version, JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version);
     assert.match(init.result.instructions, /Mandatory choice of data source/);
     assert.match(init.result.instructions, /Display transactions\/documents/);
     assert.match(init.result.instructions, /Report procedure for the assistant/);

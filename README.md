@@ -16,6 +16,10 @@ The tool catalogue retains all 76 tools. Six identical optional native-row field
 
 The live service remains on 0.21.1 until explicitly approved deployment under the release policy below. Live diagnosis on 2026-10-15 reproduced key-required Business Details on both GCNIM connections and native missing currency/source IDs in the 1,869-row Industrial ledger. Reading upstream model GUIDs through the advertised keyed forms returned 404; these are not accepted as recovered singleton record keys. No real accounting records were written.
 
+## Inventory cost review 0.21.4 (source only)
+
+Adds complete bounded inventory/unit-cost inspection and explicit native-advice duplicate cleanup previews with retained-record hash guards. See [inventory cost review](docs/INVENTORY-COST-REVIEW.md). The Skill now covers direct source correction, asset landed-cost collection, one-allocation testing and reopening native corrections until no applicable proposals remain. API2 does not expose a verified native Recalculate action: automatic recalculation remains unavailable and must not be represented by unit-cost CRUD. No deployment is implied.
+
 ## Current release: 0.21.1
 
 The OAuth consent page preserves same-origin form provenance and allows redirects only to its client's registered callback origin. This fixes real-browser authorization submissions being rejected as `Origin:null`; the 303 response still suppresses referrers. CI now covers an actual Chromium form submission and callback, in addition to HTTP/API tests.
