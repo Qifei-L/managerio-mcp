@@ -1,5 +1,9 @@
 # Evertrust Books
 
+## Release: 0.21.3
+
+Accounting Skill maintenance: choose native modules from the business event, prefer direct edits, and complete cross-module migration together with source cleanup and settlement reconciliation. Business descriptions contain business facts; operational logs stay in external audit evidence. Completion distinguishes inventory opening value, quantity and costing. The canonical Skill and generated embedded instructions remain identical. This release changes accounting guidance, not the accounting APIs or stored company records.
+
 ## Prepared release: 0.21.2 (source only)
 
 This maintenance update bounds normalized GL replies to 60,000 characters by default (configurable 12,000–120,000). Oversized raw rows or groups are withheld with `result_complete:false`, explicit budget diagnostics and executable next-request arguments. Raw reads also suggest a complete account aggregation. Native read completeness remains separate from result delivery. Grouping examples appear first in the GL tool description and quick tool selection appears first in the canonical embedded Skill.

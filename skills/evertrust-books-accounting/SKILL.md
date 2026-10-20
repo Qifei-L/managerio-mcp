@@ -29,6 +29,33 @@ GL results default to a 60,000-character budget before MCP text/structured dupli
 - **GL analysis/postings:** use the GL endpoint directly. Trace a posting to its native source document only when structured links establish that identity; use explicit document lookups to inspect original details.
 - Read and follow the GL procedure below before presenting a report. Keep the calculation in the assistant's analysis/data-processing environment or the connector's evidenced generic grouping; do not save report definitions or post accounting entries merely to produce a report.
 
+## Default native modules and correction priority
+
+Choose the module from the actual business event, not the source export's transaction type. A source row labelled Journal does not make a routine sale, supplier bill or cash movement a journal entry in Manager.
+
+| Business event | Default native module |
+| --- | --- |
+| Sales invoice / supplier invoice or bill | `sales_invoices` / `purchase_invoices` |
+| Customer money received / supplier money paid | `receipts` / `payments`, with evidenced settlement links |
+| Immediate cash expense without a supplier bill | `payments`, using the evidenced expense treatment |
+| Stock purchases and sales | `inventory_items` linked on the corresponding purchase/sales documents; verify quantities and costs separately |
+| Payroll accrual / wage payment | Prefer `payslips` / `payments` when the native payroll fields are supported |
+| Transfer between bank/cash accounts | `inter_account_transfers` |
+| Tax payment | `payments`; tax accrual follows the evidenced tax treatment |
+| Opening balances, accruals and adjustments without a dedicated native workflow | Native starting-balance settings or `journal_entries`, following the authorized company-specific treatment |
+
+Reuse native customers, suppliers, bank/cash accounts and inventory items with their evidenced control accounts and subsidiary links. Do not create ordinary COA accounts to substitute for those modules. A module preference does not establish API fields or enum meanings: if the native workflow is unsupported, explain the limitation and obtain an authorized alternative rather than silently routing everything to journals.
+
+Keep invoicing and settlement distinct. Paying an invoice clears its payable; it must not book the purchase expense again. Receiving payment clears its receivable; it must not book sales revenue again. Preserve the user's chosen opening-balance treatment for that company. A journal opening value does not populate inventory quantities or connect sales costs; do not add a second opening value to fill that gap or generalize one company's exception to other companies.
+
+**Prefer direct edits.** Correct an existing document in its current module whenever that satisfies the request. Do not create a reversal and replacement by default. Use a reversing journal only when the user explicitly requests that treatment or explicitly approves it after an evidenced closed-period or other accounting constraint prevents direct correction.
+
+**Complete cross-module migrations as a connected set.** When the evidenced API cannot convert a journal into the required native document, create that document and remove the migrated postings from the source journal. Directly edit a partially migrated journal to retain its genuine remaining lines. Delete a fully superseded source journal only under the user's specific deletion authorization. Do not leave duplicate source postings with a new reversal merely to avoid completing the migration.
+
+- Before the first financial write, prepare the connected plan: source and destination records, retained journal lines, exact deletions, subsidiary/invoice links, settlement amount changes and expected accounting differences. Obtain any missing specific authorization together before creating temporary duplicates; reuse it across unchanged execution chunks. Source conflicts remain unresolved until the user's confirmed source-priority rule or further evidence resolves them.
+- Keep one current external checkpoint of source/destination keys, current hashes, completed creates, verified changes and remaining work. Reconcile live records before resuming; old reports and deleted reversal keys are historical evidence, not the current execution state. Complete creations before capturing a ledger-bound change preview, then apply that preview without intervening unrelated accounting writes. Never repeat a confirmed or uncertain create.
+- Verify the new document's stored fields, principal/VAT/total, source-journal cleanup, party settlement and relevant inventory quantities/costs. Reconcile complete GL movements against the expected corrections, distinguishing evidenced control-account transfers from actual changes. A saved invoice alone does not establish a completed migration; disclose any temporary duplicate, unpaid balance or unconnected quantity/cost stage.
+
 ## Parameters and first-create field discovery
 
 - Read `get_tool_contract` for the exact deployed schema when a host hides constraints. Paging uses `page_size:1..100`, `skip>=0`; `find_record.max_pages:1..10` (default 5). Diagnostic native query uses camel-case `pageSize:1..100`; tool arguments and native field names are case-sensitive. GL grouping uses returned native names such as `account` and `amount`, not guessed capitalizations.
@@ -101,9 +128,9 @@ Use this workflow when asked to create a company/business/file in Manager and co
 
 Use concise plain English for newly authored bookkeeping account labels, Narration, document summaries and line descriptions. Preserve exact legal identities, reference numbers and other source identifiers; do not translate or alter them to satisfy this language convention. Describe only evidenced purpose and period, without inventing parties, invoice numbers, dates or purposes. For mixed-purpose journals, a new header may summarize the distinct purposes once, for example `Office rent and rental income, January 2025`.
 
-Keep original source memos, descriptions and other evidence intact in the source/audit record. When importing existing source text as detail, preserve it verbatim; any newly authored English summary must be separate and clearly identified. This writing convention does not authorize translation, spelling cleanup, deduplication or rewriting of source details, nor mass renaming or rewriting of existing records. Existing text may be repaired only within a specifically authorized edit; do not expand a bookkeeping or import request into a description-cleanup batch.
+Keep original source memos, descriptions and other evidence intact in the source/audit record. When importing existing source text as detail, preserve it verbatim in that source/audit record; keep any newly authored English business summary separate from the raw evidence. This writing convention does not authorize translation, spelling cleanup, deduplication or rewriting of source details, nor mass renaming or rewriting of existing records. Existing text may be repaired only within a specifically authorized edit; do not expand a bookkeeping or import request into a description-cleanup batch.
 
-Keep source file names, spreadsheet row numbers, raw JSON, account-mapping diagnostics and import logs in the audit record or an explicitly supported dedicated field. Do not paste them into Narration or Description. Keep any established unique import Reference unchanged for duplicate detection, and retain the original business reference in the audit mapping or supported reference field. A reconstructed adjustment must remain clearly identified as a reconstruction in its short business summary.
+Business-facing `Description`, `Narration` and `Lines[].LineDescription` describe only the evidenced business purpose, counterparty, period and necessary business document number. Keep source file names, spreadsheet row numbers, raw JSON, account-mapping diagnostics, import/migration logs, reversal explanations, task IDs, record keys/hashes and API results in the external audit record or an explicitly supported dedicated audit field. Do not paste them into header or line descriptions, even when copied from an earlier import. For example, write `Motorcycle purchase, invoice INV-001`, not `Migrated from journal ...; reversal verified ...`. Keep any established unique import Reference unchanged for duplicate detection, and retain the original business reference in the audit mapping or supported reference field. A reconstructed adjustment must remain clearly identified as a reconstruction in its short business summary.
 
 Use the actual native field names for each resource. A displayed Description is not necessarily the writable form field: journals distinguish Narration from line descriptions. Journal `Lines[].LineDescription` with `HasLineDescription:true` was verified in a live description-only update on Manager 26.10.10.0. The form retains Narration separately; the native GL's Description can show the line text when present. Confirm field persistence and the relevant returned line text on the first authorized document in the target version before repeating the change across a batch. If a field is discarded, reconcile that document and report the limitation; do not claim the descriptions were fixed.
 
@@ -272,6 +299,6 @@ Deletion is not supported by the current COA tools, and generic `delete_record` 
 
 ## Completion
 
-Summarize the company, action, returned document keys/task id, verification and unresolved limitations. Do not claim draft source changes are live. Never echo tokens, encrypted connection material or other companies' data.
+Summarize the company, action, returned document keys/task id, verification and unresolved limitations. For migrations, report document migration, source cleanup, receipt/payment allocation, opening values, inventory quantities and cost linkage as separate completion states where relevant. Check the affected native collections for duplicate postings, leftover migration reversals, operational logs in business descriptions and unexpected outstanding balances. Distinguish authorized accounting corrections from unexplained reconciliation differences; do not label the whole company migrated while a dependent stage remains incomplete. Do not claim draft source changes are live. Never echo tokens, encrypted connection material or other companies' data.
 
 Adapted from manager-mcp manager-accounting (MIT), copyright 2026 manager-mcp contributors. See LICENSE in this folder.
