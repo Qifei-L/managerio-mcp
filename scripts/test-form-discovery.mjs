@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import worker from '../worker/index.js';
+import worker, { clearManagerSpecCache } from '../worker/index.js';
 const data=new Map();let rev=0,empty=false,generic=true;
 const env={MANAGER_TOKEN_ENCRYPTION_KEY:'ab'.repeat(32),BUCKET:{get:async key=>data.has(key)?{etag:data.get(key).etag,json:async()=>JSON.parse(data.get(key).body)}:null,put:async(key,body)=>{data.set(key,{body,etag:String(++rev)});return {etag:String(rev)}},list:async({prefix})=>({objects:[...data.keys()].filter(key=>key.startsWith(prefix)).map(key=>({key})),truncated:false})}};
 const key='40000000-0000-4000-8000-000000000001',original=globalThis.fetch,requests=[];
@@ -36,7 +36,7 @@ try{
  r=await rpc('prepare_form_create',{connection_id:c,endpoint:'/balance-sheet-form',fields:{Periods:[]}});assert(r.structuredContent.issues.some(x=>x.code==='empty_required_array'));
  assert((await rpc('get_form_template',{connection_id:c,endpoint:'/access-token-form'})).isError);
  assert((await rpc('get_form_template',{connection_id:c,endpoint:'/inventory-item-form'},'intruder')).isError);
- generic=false;r=await rpc('get_native_form_schema',{connection_id:c,endpoint:'/inventory-item-form'});assert.equal(r.structuredContent.first_create_status,'schema_fields_available');
+ generic=false;clearManagerSpecCache();r=await rpc('get_native_form_schema',{connection_id:c,endpoint:'/inventory-item-form'});assert.equal(r.structuredContent.first_create_status,'schema_fields_available');
 
  const invoice={IssueDate:'2026-10-12T00:00:00',Reference:'TEST-PRECISION',Customer:key,Lines:[{Item:key,Account:key,Qty:2,SalesUnitPrice:59745.455},{Item:key,Account:key,Qty:1,SalesUnitPrice:0}]};
  let start=requests.length;r=await rpc('prepare_form_create',{connection_id:c,endpoint:'/sales-invoice-form',fields:invoice});assert.equal(r.structuredContent.status,'ready_for_storage_review');assert.equal(r.structuredContent.candidate_fields.Lines[0].SalesUnitPrice,59745.455);assert.equal(requests.slice(start).filter(x=>x.p==='/inventory-item-form/'+key).length,1);assert(r.structuredContent.relation_checks.some(x=>x.status==='native_item_account_verified'));

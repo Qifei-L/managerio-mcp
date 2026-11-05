@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import worker from '../worker/index.js';
+import worker, { clearManagerSpecCache } from '../worker/index.js';
 const objects=new Map();let seq=0;
 const env={MANAGER_TOKEN_ENCRYPTION_KEY:'ef'.repeat(32),BUCKET:{get:async k=>{const x=objects.get(k);return x?{etag:x.etag,json:async()=>JSON.parse(x.body)}:null},put:async(k,body)=>{objects.set(k,{body,etag:String(++seq)});return {etag:String(seq)}},list:async({prefix})=>({objects:[...objects.keys()].filter(k=>k.startsWith(prefix)).map(key=>({key})),truncated:false})}};
 const key='20000000-0000-4000-8000-000000000001';
@@ -48,7 +48,7 @@ try{
  changed=await rpc('update_business_information',{connection_id:c,expected_hash:changed.data.record_hash,fields:{Name:'Alpha renamed'}});assert.equal(changed.data.status,'succeeded');assert.equal(changed.data.connection_name_refreshed,true);assert(!(await rpc('get_business_information',{connection_id:c})).error);
  mode='discard';info=await rpc('get_business_information',{connection_id:c});changed=await rpc('update_business_information',{connection_id:c,expected_hash:info.data.record_hash,fields:{Address:'Not stored'}});assert.equal(changed.data.status,'verification_failed');assert.equal(changed.data.verified,false);
  mode='interrupt';info=await rpc('get_business_information',{connection_id:c});const beforeWrites=writes;changed=await rpc('update_business_information',{connection_id:c,expected_hash:info.data.record_hash,fields:{Address:'Uncertain'}});assert.equal(changed.data.status,'uncertain');assert.equal(writes,beforeWrites+1);assert.equal(changed.data.retryable,false);
- mode='normal';keyed=true;record.Key=key;
+ mode='normal';keyed=true;clearManagerSpecCache();record.Key=key;
  const beforeMissing=requests.length,missing=await rpc('get_business_information',{connection_id:c});assert(!missing.error,JSON.stringify(missing));assert.equal(missing.data.information_status,'native_record_not_found');assert.equal(missing.data.identity.business_name,'Alpha renamed');assert.equal(missing.data.identity.legal_identity_verified,false);assert.equal(missing.data.update_supported,false);assert(!Object.hasOwn(missing.data,'record'));assert.deepEqual(requests.slice(beforeMissing).filter(r=>r.path.startsWith('/business-details-form')).map(r=>r.path),['/business-details-form/38cf4712-6e95-4ce1-b53a-bff03edad273']);
  info=await rpc('get_business_information',{connection_id:c,key});assert(!info.error);changed=await rpc('update_business_information',{connection_id:c,key,expected_hash:info.data.record_hash,fields:{Address:'Keyed'}});assert.equal(changed.data.status,'succeeded');
  const singletonKey='38cf4712-6e95-4ce1-b53a-bff03edad273',previousFetch=globalThis.fetch;let singletonMode='available';
