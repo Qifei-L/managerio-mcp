@@ -29,15 +29,37 @@ The database records an encryption-key fingerprint. A changed encryption key blo
 
 ## Connect
 
-- Open `/` in a browser. The dedicated `/login` page asks for the existing `APP_AUTH_TOKEN` as its password. Login creates an eight-hour HttpOnly, SameSite=Strict cookie (Secure on HTTPS). Sign out revokes the session. Server restarts require signing in again; company connections stay in the volume. The simple white and dark-green workspace manages connections only; COA tools remain available through MCP.
-- MCP endpoint: `https://your-service.up.railway.app/mcp`. In a client supporting authenticated remote Streamable HTTP, configure the header `Authorization: Bearer YOUR_APP_AUTH_TOKEN`. Do not put secrets in query strings.
-- OAuth is available for remote clients. In Claude select **Sign in now → Register automatically**. In ChatGPT select **OAuth**, using dynamic client registration (DCR). Leave custom client ID/secret empty; CIMD is not advertised. Open the authorization page and approve the named client with the existing service owner password (`APP_AUTH_TOKEN`), or an existing browser owner session. The password is entered only on this service's own origin, never in OAuth client-ID/secret fields. Clients receive separate one-hour opaque access tokens and rotating 30-day refresh tokens. The existing fixed Bearer header remains supported for clients already using it.
-- Public discovery endpoints: `/.well-known/oauth-protected-resource`, `/.well-known/oauth-protected-resource/mcp`, `/.well-known/oauth-authorization-server`. The MCP 401 challenge advertises resource metadata. Authorization requires S256 PKCE, an exactly registered redirect URI, a same-origin CSRF-protected consent POST and owner approval. DCR supports public clients (`none`) and confidential clients (`client_secret_post`, `client_secret_basic`). It is bounded to 1,000 registered clients with request rate limits; arbitrary client metadata URLs are never fetched. OAuth data is stored on the existing SQLite volume, with tokens/codes/client secrets stored as hashes. Resource, client, owner, scope and expiry are checked; codes are single-use. Refresh-token reuse revokes that token family; `/oauth/revoke` revokes the caller's family. Rotating `APP_AUTH_TOKEN` or changing `APP_USER_ID` invalidates all outstanding OAuth grants. Restarts with the same configuration preserve them.
-- OAuth delegates all existing MCP tools for the service owner. It does not introduce employee identities, per-company access controls, read-only grants or tenant-wide automatic login. OAuth tokens cannot open `/mcp-settings` (which displays the owner password) or use browser connection-management APIs. Existing tool approval and read-back rules still apply.
-- The MCP endpoint is stateless: POST JSON-RPC with JSON responses and 202 notifications. GET returns 405; no SSE subscription or session ID is required.
-- `/healthz` returns only service readiness, without authentication. OAuth discovery/registration and the authorization login form are public; protected connection, accounting and MCP routes require authentication. Caller-supplied `oai-authenticated-user-id` is discarded.
+### Accounts
 
-This Railway version is a **single-owner service**: everyone holding the service secret can access all connections saved under `APP_USER_ID`. It does not replace the original host's per-user authentication. Run separate services/volumes/secrets for separate owners. Tokens still use Manager's own permissions and the existing accounting approval/read-back logic.
+- The service has user accounts. Each user's Manager company connections are private to that user: the signed-in user id is the data namespace passed to the accounting worker, and caller-supplied `oai-authenticated-user-id` headers are discarded.
+- **First admin.** On first start the original owner (`APP_USER_ID`, default `railway-owner`) becomes an admin account named `APP_ADMIN_USERNAME` (default `admin`). Its existing company connections and OAuth grants carry over. Until the admin sets a password on the **Account** page, they sign in with `APP_AUTH_TOKEN`.
+- **Registration.** `/register` creates a pending account. An admin approves or rejects it on `/admin`. Pending and suspended accounts cannot sign in or use tokens. At most 200 accounts can be pending at once.
+- **Sign-in.** `/login` takes a username and password (scrypt hashes in SQLite). Five failed attempts lock that username for 15 minutes. Sessions last eight hours, are stored in SQLite (they survive restarts) and use an HttpOnly, SameSite=Lax cookie (Secure on HTTPS). Every state-changing browser request must carry this service's exact `Origin`.
+- **Admin actions** (`/admin`): approve, reject, suspend, activate, make admin, remove admin, reset password (shows a one-time temporary password; the user is asked to change it), and view or revoke any user's tokens and authorized apps. Admins cannot suspend or demote themselves, and the last active admin is protected. Admins see each user's company count, never their Manager tokens or company data.
+- **Password changes** sign out the user's other browsers; personal tokens and authorized apps keep working. Suspension and admin password resets rotate the user's security stamp, which also revokes their OAuth grants.
+
+### MCP clients
+
+- MCP endpoint: `https://your-service.up.railway.app/mcp` (stateless Streamable HTTP: POST JSON-RPC, 202 for notifications, GET returns 405).
+- **OAuth (recommended).** In Claude choose **Sign in now → Register automatically**; in ChatGPT choose **OAuth** with dynamic client registration and leave client ID/secret empty. The authorization page sends signed-out users to `/login` and back, then shows which account is being connected. Grants belong to the user who approved them. Clients receive one-hour access tokens and rotating 30-day refresh tokens; refresh-token reuse revokes the family. Users see and revoke their apps on **MCP access**.
+- **Personal access tokens.** Created on **MCP access** with a name and an expiry (30/90/365 days or never), shown once, stored as hashes, revocable. Use them as `Authorization: Bearer ebk_…`. Personal and OAuth tokens can only call `/mcp`; they cannot open the browser pages or account APIs.
+- **Legacy master credential.** While `APP_LEGACY_BEARER` is `on` (the default), `Authorization: Bearer APP_AUTH_TOKEN` (and Basic `admin:APP_AUTH_TOKEN`) still act as the first admin, so existing clients keep working. Move them to OAuth or personal tokens, then set `APP_LEGACY_BEARER=off`. The master credential is no longer displayed on any page.
+- Rotating `APP_AUTH_TOKEN` or changing `APP_USER_ID` invalidates all OAuth grants.
+- Public endpoints: `/healthz`, OAuth discovery (`/.well-known/oauth-protected-resource`, `/.well-known/oauth-protected-resource/mcp`, `/.well-known/oauth-authorization-server`), `/oauth/register`, `/login` and `/register`. Dynamic client registration is capped at 1,000 clients; clients older than seven days with no token, code or pending authorization are removed.
+
+### HTTP API
+
+| Route | Who | Purpose |
+| --- | --- | --- |
+| `POST /api/auth/register` | anyone | `{username, password}` → pending account |
+| `POST /api/auth/login`, `POST /api/auth/logout` | anyone / session | Browser session (`POST /login` with only `{password}` still signs in the admin) |
+| `GET /api/auth/me`, `POST /api/auth/password` | session | Current user; `{current_password, new_password}` |
+| `GET /api/tokens`, `POST /api/tokens`, `DELETE /api/tokens/:id` | session | Own personal tokens and authorized apps; `{name, expires_days}` |
+| `DELETE /api/oauth/grants/:id` | session | Revoke one authorized app |
+| `GET /api/admin/users`, `POST /api/admin/users/:id` | admin | List users; `{action}` |
+| `GET /api/admin/users/:id/access`, `DELETE …/tokens/:tid`, `DELETE …/grants/:gid` | admin | A user's tokens and apps |
+| `/api/connections…` | session | The user's own Manager company connections |
+| `/api/performance`, `/api/execution` | admin | Diagnostics |
 
 ## Continuous delivery
 

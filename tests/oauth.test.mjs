@@ -23,20 +23,29 @@ async function register(app, extra = {}) {
   const response = await fetch(app.origin + '/oauth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ client_name: '<Claude & ChatGPT>', redirect_uris: [redirect], ...extra }) });
   assert.equal(response.status, 201); return response.json();
 }
-async function consent(app, client, extra = {}) {
-  const params = { client_id: client.client_id, redirect_uri: redirect, response_type: 'code', code_challenge: challenge, code_challenge_method: 'S256', resource: app.origin + '/mcp', scope: 'mcp', state: 'client-state', ...extra };
-  const response = await fetch(app.origin + '/oauth/authorize?' + new URLSearchParams(params));
-  const text = await response.text();
-  return { response, text, id: /name="request_id" value="([^"]+)"/.exec(text)?.[1], cookie: response.headers.get('set-cookie')?.split(';')[0] };
+// The consent page uses the shared login session; the original owner signs in as "admin".
+async function session(app, username = 'admin', secret = password) {
+  const response = await fetch(app.origin + '/api/auth/login', { method: 'POST', headers: { Origin: app.origin, 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password: secret }) });
+  assert.equal(response.status, 200);
+  return response.headers.get('set-cookie').split(';')[0];
 }
-async function authorize(app, client) {
-  const pending = await consent(app, client);
+async function consent(app, client, extra = {}, sessionCookie) {
+  app.sessionCookie ??= await session(app);
+  const login = sessionCookie ?? app.sessionCookie;
+  const params = { client_id: client.client_id, redirect_uri: redirect, response_type: 'code', code_challenge: challenge, code_challenge_method: 'S256', resource: app.origin + '/mcp', scope: 'mcp', state: 'client-state', ...extra };
+  const response = await fetch(app.origin + '/oauth/authorize?' + new URLSearchParams(params), { headers: { Cookie: login }, redirect: 'manual' });
+  const text = await response.text();
+  const csrf = response.headers.get('set-cookie')?.split(';')[0];
+  return { response, text, id: /name="request_id" value="([^"]+)"/.exec(text)?.[1], csrf, cookie: csrf + '; ' + login };
+}
+async function authorize(app, client, sessionCookie) {
+  const pending = await consent(app, client, {}, sessionCookie);
   assert.equal(pending.response.status, 200);
   assert.equal(pending.response.headers.get('referrer-policy'), 'same-origin');
   assert.match(pending.response.headers.get('content-security-policy'), /form-action 'self' https:\/\/claude\.example;/);
   assert(pending.text.includes('&lt;Claude &amp; ChatGPT&gt;'));
   assert(!pending.text.includes(password));
-  const response = await post(app, '/oauth/authorize', { request_id: pending.id, password, decision: 'allow' }, { Origin: app.origin, Cookie: pending.cookie });
+  const response = await post(app, '/oauth/authorize', { request_id: pending.id, decision: 'allow' }, { Origin: app.origin, Cookie: pending.cookie });
   assert.equal(response.status, 303);
   const url = new URL(response.headers.get('location'));
   assert.equal(url.origin + url.pathname, redirect);
@@ -65,12 +74,16 @@ test('OAuth discovery, DCR, explicit owner consent, PKCE, tool access, rotation 
     assert.equal((await consent(app, client, { redirect_uri: 'https://evil.example/' })).response.status, 400);
     assert.equal((await consent(app, client, { code_challenge_method: 'plain' })).response.status, 400);
     assert.equal((await consent(app, client, { resource: 'https://other.example/mcp' })).response.status, 400);
+    const anonymous = await fetch(app.origin + '/oauth/authorize?' + new URLSearchParams({ client_id: client.client_id, redirect_uri: redirect, response_type: 'code', code_challenge: challenge, code_challenge_method: 'S256' }), { redirect: 'manual' });
+    assert.equal(anonymous.status, 303);
+    assert.match(anonymous.headers.get('location'), /^\/login\?next=%2Foauth%2Fauthorize%3F/);
     const pending = await consent(app, client);
-    const args = { request_id: pending.id, password, decision: 'allow' };
+    assert.match(pending.text, /your Evertrust Books account <strong>admin<\/strong>/);
+    const args = { request_id: pending.id, decision: 'allow' };
     assert.equal((await post(app, '/oauth/authorize', args, { Origin: 'https://evil.example', Cookie: pending.cookie })).status, 403);
     assert.equal((await post(app, '/oauth/authorize', args, { Origin: 'null', Cookie: pending.cookie })).status, 403);
     assert.equal((await post(app, '/oauth/authorize', args, { Origin: app.origin })).status, 403);
-    assert.equal((await post(app, '/oauth/authorize', { ...args, password: 'wrong' }, { Origin: app.origin, Cookie: pending.cookie })).status, 401);
+    assert.equal((await post(app, '/oauth/authorize', args, { Origin: app.origin, Cookie: pending.csrf })).status, 401);
     const code = await authorize(app, client);
     assert.equal((await exchange(app, client, code, { code_verifier: randomBytes(32).toString('base64url') })).status, 400);
     assert.equal((await exchange(app, client, code, { resource: 'https://other.example/mcp' })).status, 400);
@@ -149,7 +162,7 @@ test('confidential DCR clients require their secret and cancellation never issue
     const url = new URL(response.headers.get('location'));
     assert.equal(url.searchParams.get('error'), 'access_denied');
     assert.equal(url.searchParams.has('code'), false);
-    const replay = await post(app, '/oauth/authorize', { request_id: pending.id, password, decision: 'allow' }, { Origin: app.origin, Cookie: pending.cookie });
+    const replay = await post(app, '/oauth/authorize', { request_id: pending.id, decision: 'allow' }, { Origin: app.origin, Cookie: pending.cookie });
     assert.equal(replay.status, 403);
   } finally { await app.shutdown(); rmSync(dir, { recursive: true, force: true }); }
 });

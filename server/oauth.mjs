@@ -9,11 +9,12 @@ const ACCESS_SECONDS = 3600;
 const REFRESH_SECONDS = 30 * 86400;
 const IDLE_CLIENT_MS = 7 * 86400 * 1000;
 
-// OAuth grants delegate the existing owner namespace. They never create a new
-// company identity or expose the master credential to an MCP client.
+// OAuth grants delegate one signed-in user's namespace to an MCP client. They never
+// create a new identity or expose a password or master credential to the client.
 export class OwnerOAuth {
-  constructor(config, bucket) {
+  constructor(config, bucket, accounts) {
     this.config = config;
+    this.accounts = accounts;
     this.db = bucket.db;
     this.rate = new Map();
     this.db.exec(`CREATE TABLE IF NOT EXISTS oauth_clients (id TEXT PRIMARY KEY, data TEXT NOT NULL);
@@ -26,7 +27,9 @@ export class OwnerOAuth {
 
   resource() { return `${this.config.origin}/mcp`; }
   challenge() { return `Bearer resource_metadata="${this.config.origin}/.well-known/oauth-protected-resource", scope="mcp"`; }
-  binding() { return digest(`${this.config.token}\0${this.config.user}`); }
+  // The original owner's binding (empty stamp) is unchanged, so grants issued before
+  // multi-user accounts stay valid. Suspension or password reset rotates the stamp.
+  binding(user) { return digest(`${this.config.token}\0${user.id}${user.stamp ? `\0${user.stamp}` : ''}`); }
   json(res, status, data, headers = {}) {
     res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Pragma': 'no-cache', 'X-Content-Type-Options': 'nosniff', ...headers });
     res.end(JSON.stringify(data));
@@ -82,12 +85,30 @@ export class OwnerOAuth {
   redirectValid(uri) {
     try { const u = new URL(uri); return !u.username && !u.password && !u.hash && (u.protocol === 'https:' || (u.protocol === 'http:' && ['127.0.0.1', '[::1]', 'localhost'].includes(u.hostname))); } catch { return false; }
   }
-  validGrant(data) { return data.binding === this.binding() && data.resource === this.resource() && data.user === this.config.user && data.scope === 'mcp'; }
-  authenticate(header) {
-    if (!header?.startsWith('Bearer ')) return false;
-    const row = this.db.prepare("SELECT data FROM oauth_tokens WHERE hash=? AND kind='access' AND expires>?").get(digest(header.slice(7)), Date.now());
-    return !!row && this.validGrant(JSON.parse(row.data));
+  validGrant(data) {
+    const user = this.accounts.active(data.user);
+    return !!user && data.binding === this.binding(user) && data.resource === this.resource() && data.scope === 'mcp';
   }
+  // Returns the active user an access token belongs to, or null.
+  authenticate(header) {
+    if (!header?.startsWith('Bearer ')) return null;
+    const row = this.db.prepare("SELECT data FROM oauth_tokens WHERE hash=? AND kind='access' AND expires>?").get(digest(header.slice(7)), Date.now());
+    const data = row ? JSON.parse(row.data) : null;
+    return data && this.validGrant(data) ? this.accounts.active(data.user) : null;
+  }
+  // One entry per authorized app (token family) for the account pages.
+  grants(userId) {
+    this.cleanup();
+    const families = new Map();
+    for (const row of this.db.prepare("SELECT family,kind,data,expires FROM oauth_tokens WHERE json_extract(data,'$.user')=?").all(userId)) {
+      const data = JSON.parse(row.data);
+      const entry = families.get(row.family) ?? { id: row.family, client_name: this.client(data.client_id)?.name ?? 'Removed client', authorized: data.authorized ?? null, expires: 0 };
+      if (row.kind === 'refresh') entry.expires = Math.max(entry.expires, row.expires);
+      families.set(row.family, entry);
+    }
+    return [...families.values()].filter(entry => entry.expires).sort((a, b) => (b.authorized ?? 0) - (a.authorized ?? 0));
+  }
+  revokeGrant(userId, family) { return this.db.prepare("DELETE FROM oauth_tokens WHERE family=? AND json_extract(data,'$.user')=?").run(family, userId).changes > 0; }
   clientAuthenticated(req, body, client) {
     if (!client) return false;
     if (client.method === 'none') return !body.client_secret && !req.headers.authorization;
@@ -105,7 +126,7 @@ export class OwnerOAuth {
     this.json(res, 200, { access_token: access, token_type: 'Bearer', expires_in: ACCESS_SECONDS, refresh_token: refresh, scope: data.scope });
   }
 
-  async handle(req, res, url, sessionActive) {
+  async handle(req, res, url, sessionUser) {
     const path = url.pathname;
     if (['/.well-known/oauth-protected-resource', '/.well-known/oauth-protected-resource/mcp'].includes(path) && req.method === 'GET') {
       this.json(res, 200, { resource: this.resource(), authorization_servers: [this.config.origin], scopes_supported: ['mcp'], bearer_methods_supported: ['header'], resource_name: 'Evertrust Books' }); return true;
@@ -133,10 +154,12 @@ export class OwnerOAuth {
         const q = Object.fromEntries(url.searchParams), client = this.client(q.client_id);
         if (new Set(url.searchParams.keys()).size !== [...url.searchParams.keys()].length || !client || !client.redirect_uris.includes(q.redirect_uri)) { this.error(res, 'invalid_request'); return true; }
         if (q.response_type !== 'code' || q.code_challenge_method !== 'S256' || !/^[A-Za-z0-9_-]{43}$/.test(q.code_challenge || '') || (q.resource && q.resource !== this.resource()) || (q.scope && q.scope !== 'mcp') || (q.state && q.state.length > 2048)) { this.error(res, 'invalid_request'); return true; }
+        // Sign in on the shared login page first, then return to this exact request.
+        if (!sessionUser) { res.writeHead(303, { Location: '/login?next=' + encodeURIComponent(url.pathname + url.search), 'Cache-Control': 'no-store' }); res.end(); return true; }
         const id = secret(), csrf = secret();
         const data = { ...q, resource: this.resource(), scope: 'mcp', csrf: digest(csrf) };
         this.db.prepare('INSERT INTO oauth_pending VALUES (?,?,?)').run(id, JSON.stringify(data), Date.now() + 600000);
-        this.page(res, `<h1>Connect Evertrust Books</h1><p><strong>${escape(client.name)}</strong> requests access to the existing Evertrust Books owner account.</p><p>This permits all available accounting tools, including reads and writes, for all company connections saved by this owner. It does not create a separate user account.</p><p>Return address: <code>${escape(q.redirect_uri)}</code></p><form method="post" action="/oauth/authorize"><input type="hidden" name="request_id" value="${id}">${sessionActive ? '<p>You are signed in as the service owner.</p>' : '<label>Service owner password (APP_AUTH_TOKEN)<input type="password" name="password" required autocomplete="current-password"></label>'}<button name="decision" value="allow">Authorize connection</button> <button name="decision" value="deny" formnovalidate>Cancel</button></form>`, this.cookie(csrf), q.redirect_uri); return true;
+        this.page(res, `<h1>Connect Evertrust Books</h1><p><strong>${escape(client.name)}</strong> requests access to your Evertrust Books account <strong>${escape(sessionUser.username)}</strong>.</p><p>This permits all available accounting tools, including reads and writes, for all company connections saved in your account. You can revoke it later on the MCP access page.</p><p>Return address: <code>${escape(q.redirect_uri)}</code></p><form method="post" action="/oauth/authorize"><input type="hidden" name="request_id" value="${id}"><button name="decision" value="allow">Authorize connection</button> <button name="decision" value="deny" formnovalidate>Cancel</button></form>`, this.cookie(csrf), q.redirect_uri); return true;
       }
       if (path === '/oauth/authorize' && req.method === 'POST') {
         if (req.headers.origin !== this.config.origin) { this.error(res, 'access_denied', 403); return true; }
@@ -145,7 +168,7 @@ export class OwnerOAuth {
         const csrf = (req.headers.cookie || '').split(';').map(x => x.trim()).find(x => x.startsWith('evertrust_oauth='))?.slice('evertrust_oauth='.length);
         const data = row ? JSON.parse(row.data) : null;
         if (!data || !csrf || !equal(digest(csrf), data.csrf)) { this.error(res, 'access_denied', 403); return true; }
-        if (body.decision !== 'deny' && !sessionActive && !equal(body.password, this.config.token)) { this.error(res, 'access_denied', 401); return true; }
+        if (!sessionUser) { this.error(res, 'access_denied', 401); return true; }
         this.db.prepare('DELETE FROM oauth_pending WHERE id=?').run(body.request_id);
         const redirect = new URL(data.redirect_uri);
         if (data.state !== undefined) redirect.searchParams.set('state', data.state);
@@ -153,7 +176,7 @@ export class OwnerOAuth {
         if (body.decision !== 'allow') redirect.searchParams.set('error', 'access_denied');
         else {
           const code = secret();
-          const grant = { client_id: data.client_id, redirect_uri: data.redirect_uri, challenge: data.code_challenge, resource: this.resource(), scope: 'mcp', user: this.config.user, binding: this.binding() };
+          const grant = { client_id: data.client_id, redirect_uri: data.redirect_uri, challenge: data.code_challenge, resource: this.resource(), scope: 'mcp', user: sessionUser.id, binding: this.binding(sessionUser), authorized: Date.now() };
           this.db.prepare('INSERT INTO oauth_codes VALUES (?,?,?)').run(digest(code), JSON.stringify(grant), Date.now() + 120000);
           redirect.searchParams.set('code', code);
         }
