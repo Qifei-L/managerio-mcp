@@ -153,3 +153,19 @@ test('confidential DCR clients require their secret and cancellation never issue
     assert.equal(replay.status, 403);
   } finally { await app.shutdown(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('idle registered clients are removed after a week; clients holding tokens are kept', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'evertrust-oauth-idle-'));
+  const app = await start(dir);
+  try {
+    const idle = await register(app), active = await register(app);
+    const tokens = await (await exchange(app, active, await authorize(app, active))).json();
+    const age = Date.now() - 8 * 86400 * 1000;
+    app.bucket.db.prepare("UPDATE oauth_clients SET data=json_set(data,'$.created',?)").run(age);
+    assert.equal((await fetch(app.origin + '/oauth/token', { method: 'POST' })).status, 400);
+    const ids = app.bucket.db.prepare('SELECT id FROM oauth_clients').all().map(row => row.id);
+    assert(!ids.includes(idle.client_id), 'idle client removed');
+    assert(ids.includes(active.client_id), 'client with live tokens kept');
+    assert.equal((await mcp(app, tokens.access_token)).status, 200);
+  } finally { await app.shutdown(); rmSync(dir, { recursive: true, force: true }); }
+});

@@ -80,3 +80,22 @@ test('ambiguous timeout retains the active write slot until the real completion 
     assert.equal(executor.status().pending, 0);
   } finally { await executor.close(); }
 });
+
+test('a write thread that never answers is replaced after the grace period', async () => {
+  const executor = new WriteExecutor({}, { workerUrl: new URL('./fixtures/write-executor.mjs', import.meta.url), timeoutMs: 50, hangMs: 50 });
+  try {
+    await ready(executor);
+    const hung = await executor.execute(new Request('https://books.test/hang', { method: 'POST', body: '{}' }));
+    assert.equal(hung.response.status, 503);
+    assert.equal((await hung.response.json()).reconciliation_required, true);
+    assert.equal(executor.status().pending, 1, 'capacity stays held during the grace period');
+    const busy = await executor.execute(new Request('https://books.test/fast', { method: 'POST', body: '{}' }));
+    assert.equal(busy.response.status, 503);
+    await delay(80);
+    assert.equal(executor.status().restarts, 1);
+    await ready(executor);
+    assert.equal(executor.status().pending, 0);
+    const next = await executor.execute(new Request('https://books.test/fast', { method: 'POST', body: '{}' }));
+    assert.equal(next.response.status, 200);
+  } finally { await executor.close(); }
+});
