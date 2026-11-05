@@ -122,7 +122,7 @@ Use this workflow when asked to create a company/business/file in Manager and co
 - Use `create_record` for a requested new document and `update_record` for requested changes. Prefer the task-specific tool when it is advertised and matches the request. An invoice creation does not imply sending it by email.
 - Search first: POST is not idempotent. For updates, pass the `record_hash` as `expected_hash`; omitted fields are preserved, nested objects merge, arrays replace in full and null clears.
 - Inspect status, verification differences and `reconciliation_required`. Success verifies storage only, not accounting correctness. On uncertain, unverified or verification_failed results, read/search to reconcile before any follow-up. Never automatically repeat a write or delete and recreate a document to fix verification.
-- Use deletion only for the specific document deletion requested by the user. `void_document` is a hard DELETE, not a reversible cancellation or an accounting reversal. Read the document and check its hash before deletion. Do not delete posted history merely to hide a mistake.
+- Use deletion only for the specific document deletion requested by the user. `delete_document` is a hard DELETE, not a reversible cancellation or an accounting reversal; there is no void tool. Read the document and check its hash before deletion. Do not delete posted history merely to hide a mistake.
 
 ## Business summaries and line descriptions
 

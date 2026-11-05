@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import worker from '../worker/index.js';
+import worker, { toolOutputSchema } from '../worker/index.js';
 const origin='https://coa.test',objects=new Map();let rev=0,failCheckpoint=false;
 const env={MANAGER_TOKEN_ENCRYPTION_KEY:'cd'.repeat(32),BUCKET:{get:async k=>{const o=objects.get(k);return o?{etag:o.etag,json:async()=>JSON.parse(o.value)}:null},put:async(k,value,opt)=>{const old=objects.get(k);if(opt?.onlyIf?.etagMatches&&old?.etag!==opt.onlyIf.etagMatches)return null;if(opt?.onlyIf?.etagDoesNotMatch==='*'&&old)return null;if(failCheckpoint&&k.startsWith('coa-tasks/')){failCheckpoint=false;throw Error('checkpoint unavailable')}const etag=String(++rev);objects.set(k,{value,etag});return {etag}},delete:async k=>objects.delete(k),list:async({prefix})=>({objects:[...objects.keys()].filter(k=>k.startsWith(prefix)).map(key=>({key})),truncated:false})}};
 const key=n=>'00000000-0000-4000-8000-'+String(n).padStart(12,'0');
@@ -172,7 +172,7 @@ const completeHttp=await api('/api/coa/tasks/'+bulk.task_id+'?detail=true');asse
 const smallPage=await rpc('get_coa_edit_task',{task_id:bulk.task_id,offset:1,page_size:2});assert.equal(smallPage.value.changes.length,2);assert.equal(smallPage.value.preview.next_offset,3);assert.equal(smallPage.value.preview.total,31);
 const wire=await api('/mcp',{jsonrpc:'2.0',id:100,method:'tools/call',params:{name:'get_coa_item',arguments:{connection_id:c,item_key:a1}}});assert.deepEqual(wire.data.result.structuredContent,JSON.parse(wire.data.result.content[0].text));
 const badWire=await api('/mcp',{jsonrpc:'2.0',id:101,method:'tools/call',params:{name:'get_coa_item',arguments:{connection_id:c,item_key:key(999999),kind:'balance_sheet_group'}}});assert.equal(badWire.data.result.structuredContent.error.code,'NOT_FOUND');assert.equal(badWire.data.result.isError,true);
-const coaList=(await api('/mcp',{jsonrpc:'2.0',id:102,method:'tools/list'})).data.result.tools;assert(coaList.filter(t=>t.name.includes('coa')||t.name==='get_accounts').every(t=>t.outputSchema));assert(coaList.find(t=>t.name==='get_transactions').outputSchema);
+const coaList=(await api('/mcp',{jsonrpc:'2.0',id:102,method:'tools/list'})).data.result.tools;assert(coaList.filter(t=>t.name.includes('coa')||t.name==='get_accounts').every(t=>!t.outputSchema&&t.inputSchema));assert(coaList.find(t=>t.name==='get_transactions')&&toolOutputSchema('get_transactions'));
 console.log('PASS v0.7: accounts-only chart, evidenced group membership and matching, BS root validation, ambiguous self-parent semantics, null group roots, paged JSON previews, structuredContent parity, output schemas and structured errors.');
 // Empty company: fixed BS roots remain selectable without any account ancestry.
 const savedEntities=new Map(entities);entities.clear();
@@ -207,7 +207,7 @@ const init=(await api('/mcp',{jsonrpc:'2.0',id:300,method:'initialize'})).data.r
 assert.equal(init.instructions,skillText);
 assert.equal((await rpc('get_accounting_skill')).value.content,skillText);
 const nativeTools=(await api('/mcp',{jsonrpc:'2.0',id:301,method:'tools/list'})).data.result.tools;
-for(const name of ['prepare_coa_changes','apply_coa_changes','get_coa_changes','refresh_coa_changes'])assert(nativeTools.find(t=>t.name===name)?.outputSchema);
+for(const name of ['prepare_coa_changes','apply_coa_changes','get_coa_changes','refresh_coa_changes'])assert(nativeTools.find(t=>t.name===name)&&toolOutputSchema(name));
 assert.equal(nativeTools.find(t=>t.name==='get_coa_changes').annotations.readOnlyHint,true);
 assert.equal(nativeTools.find(t=>t.name==='apply_coa_changes').annotations.destructiveHint,true);
 assert.equal(nativeTools.find(t=>t.name==='apply_coa_changes').annotations.idempotentHint,false);
