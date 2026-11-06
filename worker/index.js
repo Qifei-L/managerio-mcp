@@ -622,7 +622,6 @@ for(const [name,choices]of [['issue_quote',['sales_quotes','purchase_quotes']],[
  tools.at(-1).annotations={readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true};
 }
 registerBusiness('convert_quote_to_invoice','convert',{...businessConnection,resource:{type:'string',enum:['sales_quotes','purchase_quotes']},key:{type:'string',format:'uuid'},expected_hash:{type:'string',pattern:'^[a-f0-9]{64}$'},fields:{type:'object',additionalProperties:true,minProperties:1}},['connection_id','resource','key','expected_hash','fields'],'Read the specified quote, check its hash, and create the corresponding sales/purchase invoice from explicitly mapped native invoice fields. Preserves the quote. Does not infer tax/FX or blindly clone form types. Invoice creation is not idempotent.');
-registerBusiness('delete_document','delete',{...businessConnection,resource:{type:'string',enum:Object.keys(BUSINESS_RESOURCES)},key:{type:'string',format:'uuid'},expected_hash:{type:'string',pattern:'^[a-f0-9]{64}$'}},['connection_id','resource','key','expected_hash'],'Permanently DELETE the specifically requested document, with hash check and absence verification. It is NOT a reversible cancellation or a reversing journal. Use only when the user asks to delete this exact document.');
 
 async function deleteBusinessRecord(c,r,args,base){
  const before=await businessRead(c,r,args.key);if(await partyHash(before)!==args.expected_hash)throw new AppError('Record changed since it was read. Read it again before deletion.',409);
@@ -1190,8 +1189,9 @@ return json({error:'Not found.'},404)
 }catch(e){console.error('Evertrust Books request failed',e.name);return json({error:e instanceof AppError?e.message:'The request failed. Please refresh and retry.'},e.status||500)}}};
 
 // Routing uses the deployed contracts, never a second hand-maintained tool list.
-// Retired tool names still accepted on tools/call, but no longer listed.
-const TOOL_ALIASES={void_document:'delete_document'};
+// Retired tool names still accepted on tools/call, but no longer listed. void_document was an
+// exact duplicate of delete_record (a hard DELETE), so both old names route there.
+const TOOL_ALIASES={void_document:'delete_record',delete_document:'delete_record'};
 // outputSchema stays server-side for validation; clients do not need it in their context.
 const LISTED_TOOLS=tools.map(({outputSchema,...tool})=>tool);
 export function clearManagerSpecCache() { managerSpecCache.clear(); }
