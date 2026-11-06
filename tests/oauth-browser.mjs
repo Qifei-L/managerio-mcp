@@ -15,7 +15,8 @@ const app = createApplication(config);
 let browser;
 let callback;
 const callbackServer = createServer((req, res) => {
-  callback = { url: req.url, referer: req.headers.referer };
+  // Branded Chrome also requests /favicon.ico with the callback page as referrer.
+  if (req.url.startsWith('/return')) callback = { url: req.url, referer: req.headers.referer };
   res.writeHead(200, { 'Content-Type': 'text/plain' });
   res.end('Authorized callback reached');
 });
@@ -33,9 +34,16 @@ try {
   const query = new URLSearchParams({ client_id: client.client_id, redirect_uri: client.redirect_uris[0], response_type: 'code', code_challenge_method: 'S256', code_challenge: createHash('sha256').update(verifier).digest('base64url'), resource: config.origin + '/mcp', state: 'browser-state' });
   browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}) });
   const page = await browser.newPage();
-  const authorizationPage = await page.goto(config.origin + '/oauth/authorize?' + query);
+  // Signed-out users go through the shared login page and come back to the consent page.
+  await page.goto(config.origin + '/oauth/authorize?' + query);
+  assert.equal(new URL(page.url()).pathname, '/login');
+  await page.getByLabel('Username').fill('admin');
+  await page.getByLabel('Password').fill(password);
+  const consentPage = page.waitForResponse(r => r.request().method() === 'GET' && new URL(r.url()).pathname === '/oauth/authorize');
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  const authorizationPage = await consentPage;
   assert.equal(authorizationPage.headers()['referrer-policy'], 'same-origin');
-  await page.getByLabel('Service owner password').fill(password);
+  await page.getByText('your Evertrust Books account').waitFor();
   const posted = page.waitForResponse(r => r.request().method() === 'POST' && r.url().endsWith('/oauth/authorize'));
   await page.getByRole('button', { name: 'Authorize connection', exact: true }).click();
   const response = await posted;
@@ -49,5 +57,5 @@ try {
   assert.equal(returned.searchParams.get('state'), 'browser-state');
   const exchanged = await fetch(config.origin + '/oauth/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ client_id: client.client_id, grant_type: 'authorization_code', code: returned.searchParams.get('code'), code_verifier: verifier, redirect_uri: client.redirect_uris[0] }) });
   assert.equal(exchanged.status, 200);
-  console.log('PASS browser OAuth: real form Origin, cookie, consent, registered cross-origin callback, no referrer leakage and PKCE exchange.');
+  console.log('PASS browser OAuth: shared login redirect and return, real form Origin, cookie, consent, registered cross-origin callback, no referrer leakage and PKCE exchange.');
 } finally { if (browser) await browser.close(); await app.shutdown(); await new Promise(done => callbackServer.close(done)); rmSync(dir, { recursive: true, force: true }); }

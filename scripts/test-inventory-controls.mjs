@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import worker from '../worker/index.js';
+import worker, { clearManagerSpecCache } from '../worker/index.js';
 const objects=new Map();let rev=0,next=100,mode='normal';
 const env={MANAGER_TOKEN_ENCRYPTION_KEY:'fe'.repeat(32),BUCKET:{get:async key=>{const v=objects.get(key);return v?{etag:v.etag,json:async()=>JSON.parse(v.body)}:null},put:async(key,body)=>{objects.set(key,{body,etag:String(++rev)});return {etag:String(rev)}},delete:async key=>objects.delete(key),list:async({prefix})=>({objects:[...objects.keys()].filter(k=>k.startsWith(prefix)).map(key=>({key})),truncated:false})}};
 const id=n=>'30000000-0000-4000-8000-'+String(n).padStart(12,'0'),assets='4c05c221-ca57-4c7c-be62-115669302ed4';
@@ -40,6 +40,6 @@ try{
  const last=await rpc('list_inventory_control_accounts',{connection_id:alpha,page_size:1,skip:1});assert.equal(last.data.complete,false);assert.equal(last.data.has_more,false);
  const other=await rpc('list_inventory_control_accounts',{connection_id:beta});assert.equal(other.data.business_name,'Other');assert.equal(reads.at(-1).token,'beta');
  for(const [testMode,status]of [['interrupt','uncertain'],['reject','rejected'],['no_key','unverified'],['readback_failure','uncertain'],['discard','verification_failed']]){mode=testMode;const before=writes.length;const r=await rpc('create_inventory_control_account',{connection_id:alpha,fields:{Name:'Outcome '+testMode,Group:assets}});assert.equal(r.data.status,status,JSON.stringify(r));assert.equal(r.data.retryable,false);assert.equal(writes.length,before+1)}
- mode='unsupported';assert((await rpc('create_inventory_control_account',{connection_id:alpha,fields:{Name:'Unsupported',Group:assets}})).error);
+ mode='unsupported';clearManagerSpecCache();assert((await rpc('create_inventory_control_account',{connection_id:alpha,fields:{Name:'Unsupported',Group:assets}})).error);
  console.log('PASS Inventory controls: dedicated native routing; chart-only inventory disclosure; duplicate, group and field validation; hash conflicts, preserved settings, no-op; cache invalidation; rejected/uncertain/discarded writes without retry; isolated companies; schema reference discovery.');
 }finally{globalThis.fetch=originalFetch}

@@ -1,5 +1,15 @@
 # Evertrust Books
 
+## Prepared release: 0.23.0 (source only)
+
+The accounting Skill is split into a short core and nine on-demand topics. `initialize` now sends only the core (about 13k characters instead of about 61k); `get_accounting_skill` returns the core without arguments and a topic's detailed rules with `topic` (`reports-and-ledger`, `corrections-and-migrations`, `chart-of-accounts`, `inventory`, `forms-and-fields`, `receipts-payments-deposits`, `descriptions-and-exports`, `company-onboarding`, `settings-and-business-info`). Topic files live in `skills/evertrust-books-accounting/references/`. Rule text moved unchanged; the correction rule stays "prefer direct edits, reversing journals only with explicit user approval".
+
+Adds inventory cost review: `get_inventory_cost_state` and `prepare_inventory_cost_cleanup` (see [inventory cost review](docs/INVENTORY-COST-REVIEW.md)), with journal-opening and landed-cost guidance in the `corrections-and-migrations` and `inventory` topics.
+
+## Release: 0.22.0
+
+Multi-user accounts. People register on `/register` and an admin approves them on `/admin`; each user's company connections are private. Login, OAuth consent and tokens now share one account system: the OAuth page uses the normal sign-in, and users create revocable personal access tokens on **MCP access** instead of sharing `APP_AUTH_TOKEN`. The original owner becomes the `admin` account and keeps its companies and existing OAuth grants. The legacy master Bearer keeps working while `APP_LEGACY_BEARER=on` (default). Accounting tools, Manager writes and stored company records are unchanged. See [Railway: Connect](docs/RAILWAY.md#connect).
+
 ## Release: 0.21.3
 
 Accounting Skill maintenance: choose native modules from the business event, prefer direct edits, and complete cross-module migration together with source cleanup and settlement reconciliation. Business descriptions contain business facts; operational logs stay in external audit evidence. Completion distinguishes inventory opening value, quantity and costing. The canonical Skill and generated embedded instructions remain identical. This release changes accounting guidance, not the accounting APIs or stored company records.
@@ -31,7 +41,7 @@ The OAuth consent page preserves same-origin form provenance and allows redirect
 
 ## Railway deployment
 
-The repository includes a Node.js 24 service, Dockerfile, `railway.json`, persistent SQLite storage and GitHub CI. Follow [the Railway guide](docs/RAILWAY.md) to configure a volume, secrets, Manager API URL and GitHub autodeploys. Start with `npm run dev` locally or `npm start` with configured environment variables. The Railway adapter uses a single-owner Bearer/Basic credential; it does not trust public identity headers. Source exports do not contain your existing cloud connections.
+The repository includes a Node.js 24 service, Dockerfile, `railway.json`, persistent SQLite storage and GitHub CI. Follow [the Railway guide](docs/RAILWAY.md) to configure a volume, secrets, Manager API URL and GitHub autodeploys. Start with `npm run dev` locally or `npm start` with configured environment variables. The Railway adapter has per-user accounts (see 0.22.0) and does not trust public identity headers. Source exports do not contain your existing cloud connections.
 
 Reads and accounting mutations now use separate execution modules and event loops within this same Railway deployment. A long-lived write thread serializes mutable tool calls, shares the encrypted local database, preserves existing approval/read-back checks and never automatically replays failed writes. Concurrent write calls are rejected before dispatch. This first stage keeps the existing endpoint and volume; it is not yet two independently deployed services or a new durable batch API. See the deployment guide for limits and executor diagnostics.
 
