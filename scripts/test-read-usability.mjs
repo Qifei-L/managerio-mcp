@@ -7,6 +7,7 @@ assert(JSON.stringify(inventory).length<300000,'tool catalogue must stay below 3
 for(const name of ['get_transactions','get_coa_structure','resolve_record_links','get_tool_contract','get_financial_report_data','apply_coa_changes'])assert(tools.some(t=>t.name===name));
 const gl=tools.find(t=>t.name==='get_transactions');assert(gl.description.startsWith('For compact GL totals'));assert.equal(gl.inputSchema.properties.max_output_chars.default,60000);
 const structure=tools.find(t=>t.name==='get_coa_structure');assert.equal(structure.inputSchema.properties.page_size.maximum,100);
+for(const tool of tools)for(const [key,schema]of Object.entries(tool.inputSchema.properties||{})){const d=schema.description||'';const notes=d.match(/Integer \S+\.\.\S+\./g)||[];assert(notes.length<=1,tool.name+'.'+key+' repeats its range note: '+d)}
 const initialized=await rpc('initialize',{});assert(initialized.instructions.indexOf('## Quick tool selection')<1000);
 assert(initialized.instructions.includes('`settings-and-business-info`'),'Business Details guidance is reachable from the core topic list');assert(initialized.instructions.length<15000,'initialize sends only the core Skill');
 console.log(`PASS read usability: ${tools.length} tools retained, catalogue ${JSON.stringify(inventory).length} characters, grouping examples and early workflow routing.`);
