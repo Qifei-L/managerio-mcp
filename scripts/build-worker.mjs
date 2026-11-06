@@ -1,7 +1,12 @@
-import {readFileSync,writeFileSync} from 'node:fs';
-const skill=readFileSync(new URL('../skills/evertrust-books-accounting/SKILL.md',import.meta.url),'utf8');
+import {readFileSync,writeFileSync,readdirSync} from 'node:fs';
+const skillDir=new URL('../skills/evertrust-books-accounting/',import.meta.url);
+const skill=readFileSync(new URL('SKILL.md',skillDir),'utf8');
+// Topic files are embedded in name order; the slug is the file name without .md.
+const topics=Object.fromEntries(readdirSync(new URL('references/',skillDir)).filter(f=>f.endsWith('.md')).sort().map(f=>[f.slice(0,-3),readFileSync(new URL('references/'+f,skillDir),'utf8')]));
 let source=readFileSync(new URL('../worker/index.js',import.meta.url),'utf8');
 const batchSource=readFileSync(new URL('../worker/record-batches.js',import.meta.url),'utf8').replace(/^export /gm,'');
 source=source.replace('import { recordBatchSchemas, validateRecordBatch, recordBatchCall } from "./record-batches.js";', () => 'const { recordBatchSchemas, validateRecordBatch, recordBatchCall } = (() => {\n'+batchSource+'\nreturn { recordBatchSchemas, validateRecordBatch, recordBatchCall };\n})();');
-writeFileSync(new URL('../worker/accounting-skill.js',import.meta.url),'export default '+JSON.stringify(skill)+';\n');
-writeFileSync(new URL('../dist/server/index.js',import.meta.url),source.replace('import ACCOUNTING_SKILL from "./accounting-skill.js";', () => 'const ACCOUNTING_SKILL='+JSON.stringify(skill)+';'));
+const costSource=readFileSync(new URL('../worker/inventory-cost-review.js',import.meta.url),'utf8').replace(/^export /gm,'');
+source=source.replace('import { inventoryCostState, prepareInventoryCostCleanup } from "./inventory-cost-review.js";',()=>costSource);
+writeFileSync(new URL('../worker/accounting-skill.js',import.meta.url),'export default '+JSON.stringify(skill)+';\nexport const ACCOUNTING_TOPICS = '+JSON.stringify(topics)+';\n');
+writeFileSync(new URL('../dist/server/index.js',import.meta.url),source.replace('import ACCOUNTING_SKILL, { ACCOUNTING_TOPICS } from "./accounting-skill.js";', () => 'const ACCOUNTING_SKILL='+JSON.stringify(skill)+';const ACCOUNTING_TOPICS='+JSON.stringify(topics)+';'));

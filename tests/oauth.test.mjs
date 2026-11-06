@@ -102,7 +102,8 @@ test('OAuth discovery, DCR, explicit owner consent, PKCE, tool access, rotation 
     assert.equal(init.result.serverInfo.version, JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version);
     assert.match(init.result.instructions, /Mandatory choice of data source/);
     assert.match(init.result.instructions, /Display transactions\/documents/);
-    assert.match(init.result.instructions, /Report procedure for the assistant/);
+    assert.match(init.result.instructions, /`reports-and-ledger`/);
+    assert(!init.result.instructions.includes('Report procedure for the assistant'), 'detailed topics are not sent at initialize');
     const firstRefresh = await post(app, '/oauth/token', { client_id: client.client_id, grant_type: 'refresh_token', refresh_token: tokens.refresh_token });
     assert.equal(firstRefresh.status, 200);
     const rotated = await firstRefresh.json();

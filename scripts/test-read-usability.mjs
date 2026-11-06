@@ -8,5 +8,5 @@ for(const name of ['get_transactions','get_coa_structure','resolve_record_links'
 const gl=tools.find(t=>t.name==='get_transactions');assert(gl.description.startsWith('For compact GL totals'));assert.equal(gl.inputSchema.properties.max_output_chars.default,60000);
 const structure=tools.find(t=>t.name==='get_coa_structure');assert.equal(structure.inputSchema.properties.page_size.maximum,100);
 const initialized=await rpc('initialize',{});assert(initialized.instructions.indexOf('## Quick tool selection')<1000);
-assert(initialized.instructions.includes('native_record_not_found'));
+assert(initialized.instructions.includes('`settings-and-business-info`'),'Business Details guidance is reachable from the core topic list');assert(initialized.instructions.length<15000,'initialize sends only the core Skill');
 console.log(`PASS read usability: ${tools.length} tools retained, catalogue ${JSON.stringify(inventory).length} characters, grouping examples and early workflow routing.`);

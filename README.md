@@ -1,6 +1,12 @@
 # Evertrust Books
 
-## Prepared release: 0.22.0 (source only)
+## Prepared release: 0.23.0 (source only)
+
+The accounting Skill is split into a short core and nine on-demand topics. `initialize` now sends only the core (about 13k characters instead of about 61k); `get_accounting_skill` returns the core without arguments and a topic's detailed rules with `topic` (`reports-and-ledger`, `corrections-and-migrations`, `chart-of-accounts`, `inventory`, `forms-and-fields`, `receipts-payments-deposits`, `descriptions-and-exports`, `company-onboarding`, `settings-and-business-info`). Topic files live in `skills/evertrust-books-accounting/references/`. Rule text moved unchanged; the correction rule stays "prefer direct edits, reversing journals only with explicit user approval".
+
+Adds inventory cost review: `get_inventory_cost_state` and `prepare_inventory_cost_cleanup` (see [inventory cost review](docs/INVENTORY-COST-REVIEW.md)), with journal-opening and landed-cost guidance in the `corrections-and-migrations` and `inventory` topics.
+
+## Release: 0.22.0
 
 Multi-user accounts. People register on `/register` and an admin approves them on `/admin`; each user's company connections are private. Login, OAuth consent and tokens now share one account system: the OAuth page uses the normal sign-in, and users create revocable personal access tokens on **MCP access** instead of sharing `APP_AUTH_TOKEN`. The original owner becomes the `admin` account and keeps its companies and existing OAuth grants. The legacy master Bearer keeps working while `APP_LEGACY_BEARER=on` (default). Accounting tools, Manager writes and stored company records are unchanged. See [Railway: Connect](docs/RAILWAY.md#connect).
 
@@ -19,6 +25,10 @@ GL currency evidence reports missing native money currencies, retains native mon
 The tool catalogue retains all 76 tools. Six identical optional native-row field descriptions previously repeated inside every feed schema are replaced with open native row objects; direct document/item field hints, exact input contracts, required envelopes and existing write protections remain. Regression checks cover catalogue size, response withholding, follow-up requests, missing/mixed currencies, duplicate connection names, missing Business Details keys and larger cached COA pages. Build regenerates the embedded Skill byte-for-byte.
 
 The live service remains on 0.21.1 until explicitly approved deployment under the release policy below. Live diagnosis on 2026-10-15 reproduced key-required Business Details on both GCNIM connections and native missing currency/source IDs in the 1,869-row Industrial ledger. Reading upstream model GUIDs through the advertised keyed forms returned 404; these are not accepted as recovered singleton record keys. No real accounting records were written.
+
+## Inventory cost review 0.21.4 (source only)
+
+Adds complete bounded inventory/unit-cost inspection and explicit native-advice duplicate cleanup previews with retained-record hash guards. See [inventory cost review](docs/INVENTORY-COST-REVIEW.md). The Skill now covers direct source correction, asset landed-cost collection, one-allocation testing and reopening native corrections until no applicable proposals remain. API2 does not expose a verified native Recalculate action: automatic recalculation remains unavailable and must not be represented by unit-cost CRUD. No deployment is implied.
 
 ## Current release: 0.21.1
 
