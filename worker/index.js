@@ -1003,7 +1003,8 @@ async function inventoryCostInspect(c,envelope){
 for(const tool of tools){
  const constraints=Object.entries(tool.inputSchema.properties||{}).filter(([,s])=>s.type==='integer'&&(s.minimum!==undefined||s.maximum!==undefined)).map(([key,s])=>key+': integer '+(s.minimum??'unbounded')+'..'+(s.maximum??'unbounded'));
  if(constraints.length)tool.description+=' Parameter ranges: '+constraints.join('; ')+'.';
- for(const [name,s]of Object.entries(tool.inputSchema.properties||{}))if(s.type==='integer'&&(s.minimum!==undefined||s.maximum!==undefined))s.description=[s.description,'Integer '+(s.minimum??'unbounded')+'..'+(s.maximum??'unbounded')+'.'].filter(Boolean).join(' ');
+ // Several tools share one property schema object; add the range note only once.
+ for(const [name,s]of Object.entries(tool.inputSchema.properties||{}))if(s.type==='integer'&&(s.minimum!==undefined||s.maximum!==undefined)){const note='Integer '+(s.minimum??'unbounded')+'..'+(s.maximum??'unbounded')+'.';if(!(s.description||'').includes(note))s.description=[s.description,note].filter(Boolean).join(' ')}
 }
 
 function validateBusinessFields(fields){
