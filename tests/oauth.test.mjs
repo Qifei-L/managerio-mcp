@@ -11,6 +11,13 @@ const key = randomBytes(32).toString('hex');
 const verifier = randomBytes(32).toString('base64url');
 const challenge = createHash('sha256').update(verifier).digest('base64url');
 const redirect = 'https://claude.example/callback';
+// Restarting on the same port: give the test's HTTP client a moment to see that the old
+// server closed its keep-alive sockets, or it may reuse one and fail with "other side closed".
+async function restart(app, dir, port, token) {
+  await app.shutdown();
+  await new Promise(done => setTimeout(done, 100));
+  return start(dir, port, token);
+}
 async function start(dir, port = 0, token = password) {
   const settings = configuration({ APP_AUTH_TOKEN: token, MANAGER_TOKEN_ENCRYPTION_KEY: key, MANAGER_API_BASE: 'https://manager.example/api2', DATA_DIR: dir, PORT: String(port) });
   const app = createApplication(settings);
@@ -130,7 +137,7 @@ test('OAuth state persists across restarts, expires and is invalidated by master
     const client = await register(app);
     const code = await authorize(app, client);
     const port = app.server.address().port;
-    await app.shutdown(); app = await start(dir, port);
+    app = await restart(app, dir, port);
     const response = await exchange(app, client, code);
     assert.equal(response.status, 200);
     const tokens = await response.json();
@@ -138,7 +145,7 @@ test('OAuth state persists across restarts, expires and is invalidated by master
     app.bucket.db.prepare("UPDATE oauth_tokens SET expires=0 WHERE kind='access'").run();
     assert.equal((await mcp(app, tokens.access_token)).status, 401);
     const next = await (await post(app, '/oauth/token', { client_id: client.client_id, grant_type: 'refresh_token', refresh_token: tokens.refresh_token })).json();
-    await app.shutdown(); app = await start(dir, port, randomBytes(32).toString('hex'));
+    app = await restart(app, dir, port, randomBytes(32).toString('hex'));
     assert.equal((await mcp(app, next.access_token)).status, 401);
     assert.equal((await post(app, '/oauth/token', { client_id: client.client_id, grant_type: 'refresh_token', refresh_token: next.refresh_token })).status, 400);
   } finally { await app.shutdown(); rmSync(dir, { recursive: true, force: true }); }
