@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import worker from '../worker/index.js';
+import worker, { toolOutputSchema } from '../worker/index.js';
 const objects=new Map();let version=0,mode='normal';
 const env={MANAGER_TOKEN_ENCRYPTION_KEY:'ea'.repeat(32),BUCKET:{get:async k=>objects.has(k)?{etag:objects.get(k).etag,json:async()=>JSON.parse(objects.get(k).body)}:null,put:async(k,body)=>{objects.set(k,{body,etag:String(++version)});return {etag:String(version)}},delete:async k=>objects.delete(k),list:async({prefix})=>({objects:[...objects.keys()].filter(k=>k.startsWith(prefix)).map(key=>({key})),truncated:false})}};
 const key='019fa2b6-97c6-7d0a-a6d7-a0c39ee5989a',other='019fa2b4-855a-7d41-9f42-559146d7666b',account='45fbc769-10b4-4924-bbf9-641c79e076fd';
@@ -34,7 +34,7 @@ try{
  const connection_id=(await request('/api/connections',{token:'alpha'})).connection.connection_id;
  await request('/api/connections',{token:'beta'});const connections=await rpc('list_connections',{});assert(!connections.isError,JSON.stringify(connections));assert.equal(connections.structuredContent.business_name,null);assert(connections.structuredContent.business_tools.includes('find_record'));
  const tools=(await request('/mcp',{jsonrpc:'2.0',id:2,method:'tools/list'})).result.tools;
- const schema=tools.find(t=>t.name==='list_records').outputSchema.properties.items.items;assert.equal(schema.additionalProperties,true);for(const field of ['Key','IssueDate','Reference','Customer','Description','Total','Status'])assert(schema.properties[field]);assert.equal(tools.find(t=>t.name==='get_record').outputSchema.properties.record.additionalProperties,true);
+ const schema=toolOutputSchema('list_records').properties.items.items;assert.equal(schema.additionalProperties,true);for(const field of ['Key','IssueDate','Reference','Customer','Description','Total','Status'])assert(schema.properties[field]);assert.equal(toolOutputSchema('get_record').properties.record.additionalProperties,true);
  for(const resource of Object.keys(docs)){const r=await rpc('list_records',{connection_id,resource,page_size:1});assert(!r.isError,JSON.stringify(r));const item=r.structuredContent.items[0];assert.equal(item.Key,key);assert.equal(item.key,key);assert.equal(item.Reference,'0021');assert.equal(item.Total.value,824.07);assert.equal(item.Total.currency,'USD');assert.equal(item.balanceDue.value,0);assert.deepEqual(item.custom,{deep:{value:5}});assert.equal(r.structuredContent.next_skip,1)}
  const byKey=(await rpc('find_record',{connection_id,resource:'sales_invoices',key})).structuredContent;assert.equal(byKey.status,'found');assert.equal(byKey.record.Lines[0].Account,account);assert.match(byKey.record_hash,/^[a-f0-9]{64}$/);
  mode='missingreference';const missingReference=(await rpc('find_record',{connection_id,resource:'sales_invoices',reference:'0021',page_size:1})).structuredContent;assert.equal(missingReference.status,'found');assert.equal(missingReference.reference_detail_reads,2);mode='normal';

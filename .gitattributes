@@ -1,3 +1,7 @@
+* text=auto eol=lf
+*.png binary
+*.xlsx binary
+*.zip binary
 # Keep the source skill and its generated embedded text identical on every host.
 skills/evertrust-books-accounting/SKILL.md text eol=lf
 worker/accounting-skill.js text eol=lf

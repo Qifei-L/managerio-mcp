@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes, createHash } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { configuration, createApplication } from '../server/index.mjs';
@@ -86,7 +86,7 @@ test('OAuth discovery, DCR, explicit owner consent, PKCE, tool access, rotation 
     assert.equal((await fetch(app.origin + '/api/connections', { headers: { Authorization: 'Bearer ' + tokens.access_token } })).status, 401);
     assert.equal((await fetch(app.origin + '/mcp-settings', { headers: { Authorization: 'Bearer ' + tokens.access_token }, redirect: 'manual' })).status, 303);
     const init = await (await mcp(app, tokens.access_token, 'initialize')).json();
-    assert.equal(init.result.serverInfo.version, '0.21.2');
+    assert.equal(init.result.serverInfo.version, JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version);
     assert.match(init.result.instructions, /Mandatory choice of data source/);
     assert.match(init.result.instructions, /Display transactions\/documents/);
     assert.match(init.result.instructions, /Report procedure for the assistant/);
@@ -151,5 +151,21 @@ test('confidential DCR clients require their secret and cancellation never issue
     assert.equal(url.searchParams.has('code'), false);
     const replay = await post(app, '/oauth/authorize', { request_id: pending.id, password, decision: 'allow' }, { Origin: app.origin, Cookie: pending.cookie });
     assert.equal(replay.status, 403);
+  } finally { await app.shutdown(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('idle registered clients are removed after a week; clients holding tokens are kept', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'evertrust-oauth-idle-'));
+  const app = await start(dir);
+  try {
+    const idle = await register(app), active = await register(app);
+    const tokens = await (await exchange(app, active, await authorize(app, active))).json();
+    const age = Date.now() - 8 * 86400 * 1000;
+    app.bucket.db.prepare("UPDATE oauth_clients SET data=json_set(data,'$.created',?)").run(age);
+    assert.equal((await fetch(app.origin + '/oauth/token', { method: 'POST' })).status, 400);
+    const ids = app.bucket.db.prepare('SELECT id FROM oauth_clients').all().map(row => row.id);
+    assert(!ids.includes(idle.client_id), 'idle client removed');
+    assert(ids.includes(active.client_id), 'client with live tokens kept');
+    assert.equal((await mcp(app, tokens.access_token)).status, 200);
   } finally { await app.shutdown(); rmSync(dir, { recursive: true, force: true }); }
 });

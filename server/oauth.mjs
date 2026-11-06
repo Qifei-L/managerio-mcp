@@ -7,6 +7,7 @@ const escape = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', 
 const MAX_CLIENTS = 1000;
 const ACCESS_SECONDS = 3600;
 const REFRESH_SECONDS = 30 * 86400;
+const IDLE_CLIENT_MS = 7 * 86400 * 1000;
 
 // OAuth grants delegate the existing owner namespace. They never create a new
 // company identity or expose the master credential to an MCP client.
@@ -19,6 +20,8 @@ export class OwnerOAuth {
       CREATE TABLE IF NOT EXISTS oauth_pending (id TEXT PRIMARY KEY, data TEXT NOT NULL, expires INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS oauth_codes (hash TEXT PRIMARY KEY, data TEXT NOT NULL, expires INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS oauth_tokens (hash TEXT PRIMARY KEY, kind TEXT NOT NULL, family TEXT NOT NULL, data TEXT NOT NULL, expires INTEGER NOT NULL);`);
+    // Clients registered before registration times were stored start their idle period now.
+    this.db.prepare("UPDATE oauth_clients SET data=json_set(data,'$.created',?) WHERE json_extract(data,'$.created') IS NULL").run(Date.now());
   }
 
   resource() { return `${this.config.origin}/mcp`; }
@@ -51,6 +54,12 @@ export class OwnerOAuth {
   cleanup() {
     const now = Date.now();
     for (const table of ['oauth_pending', 'oauth_codes', 'oauth_tokens']) this.db.prepare(`DELETE FROM ${table} WHERE expires <= ?`).run(now);
+    // Open registration must not fill MAX_CLIENTS permanently: drop clients that are older
+    // than a week and hold no live token, code or pending authorization.
+    this.db.prepare(`DELETE FROM oauth_clients WHERE json_extract(data,'$.created') <= ?
+      AND id NOT IN (SELECT json_extract(data,'$.client_id') FROM oauth_tokens WHERE json_extract(data,'$.client_id') IS NOT NULL)
+      AND id NOT IN (SELECT json_extract(data,'$.client_id') FROM oauth_codes WHERE json_extract(data,'$.client_id') IS NOT NULL)
+      AND id NOT IN (SELECT json_extract(data,'$.client_id') FROM oauth_pending WHERE json_extract(data,'$.client_id') IS NOT NULL)`).run(now - IDLE_CLIENT_MS);
   }
   async body(req, json = false) {
     const parts = []; let size = 0;
@@ -115,7 +124,7 @@ export class OwnerOAuth {
         if (!['none', 'client_secret_post', 'client_secret_basic'].includes(method) || (body.grant_types && (!Array.isArray(body.grant_types) || body.grant_types.some(x => !['authorization_code', 'refresh_token'].includes(x)))) || (body.response_types && (!Array.isArray(body.response_types) || body.response_types.some(x => x !== 'code')))) { this.error(res, 'invalid_client_metadata'); return true; }
         if (this.db.prepare('SELECT count(*) AS n FROM oauth_clients').get().n >= MAX_CLIENTS) { this.error(res, 'temporarily_unavailable', 503); return true; }
         const id = secret(), clientSecret = method === 'none' ? null : secret();
-        const client = { redirect_uris: [...new Set(body.redirect_uris)], name: String(body.client_name || 'MCP client').slice(0, 200), method, ...(clientSecret ? { secret_hash: digest(clientSecret) } : {}) };
+        const client = { redirect_uris: [...new Set(body.redirect_uris)], name: String(body.client_name || 'MCP client').slice(0, 200), method, created: Date.now(), ...(clientSecret ? { secret_hash: digest(clientSecret) } : {}) };
         this.db.prepare('INSERT INTO oauth_clients VALUES (?,?)').run(id, JSON.stringify(client));
         this.json(res, 201, { client_id: id, client_id_issued_at: Math.floor(Date.now() / 1000), redirect_uris: client.redirect_uris, client_name: client.name, token_endpoint_auth_method: method, grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'], ...(clientSecret ? { client_secret: clientSecret, client_secret_expires_at: 0 } : {}) }); return true;
       }

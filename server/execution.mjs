@@ -17,11 +17,13 @@ const unavailable = () => Response.json({ error: 'Write executor unavailable. In
 
 // One long-lived executor; no automatic replay after a crash or timeout.
 export class WriteExecutor {
-  constructor(config, { workerUrl = new URL('./write-service.mjs', import.meta.url), maxPending = 1, timeoutMs = 150_000 } = {}) {
+  constructor(config, { workerUrl = new URL('./write-service.mjs', import.meta.url), maxPending = 1, timeoutMs = 150_000, hangMs = 60_000 } = {}) {
     this.config = { managerBase: config.managerBase, key: config.key, dataDir: config.dataDir };
     this.workerUrl = workerUrl;
     this.maxPending = maxPending;
     this.timeoutMs = timeoutMs;
+    this.hangMs = hangMs;
+    this.restarts = 0;
     this.pending = new Map();
     this.sequence = 0;
     this.closed = false;
@@ -52,7 +54,7 @@ export class WriteExecutor {
     thread.on('error', fail);
     thread.on('exit', () => { fail(); if (thread === this.thread) this.thread = null; });
   }
-  status() { return { ready: this.ready, pending: this.pending.size, capacity: this.maxPending }; }
+  status() { return { ready: this.ready, pending: this.pending.size, capacity: this.maxPending, restarts: this.restarts }; }
   async execute(request) {
     if (this.closed) return { response: unavailable() };
     if (!this.thread) this.start();
@@ -70,6 +72,20 @@ export class WriteExecutor {
         // The write may still finish. Keep its capacity slot until its real result arrives.
         const item = this.pending.get(id);
         if (item) { item.resolve({ response: unavailable() }); item.resolve = () => {}; }
+        // A thread that still has not answered after the grace period is treated as hung:
+        // replace it so later writes are not rejected as busy until a process restart.
+        // The caller already received reconciliation_required; nothing is replayed.
+        if (item) item.timer = setTimeout(() => {
+          if (this.pending.get(id) !== item || this.closed) return;
+          const hung = this.thread;
+          this.thread = null;
+          this.ready = false;
+          for (const other of this.pending.values()) { clearTimeout(other.timer); other.resolve({ response: unavailable() }); }
+          this.pending.clear();
+          this.restarts++;
+          hung?.terminate().catch(() => {});
+          this.start();
+        }, this.hangMs);
       }, this.timeoutMs);
       this.pending.set(id, { resolve, timer });
       try { this.thread.postMessage({ id, url: request.url, method: request.method, headers: [...request.headers], body }, [body]); }
@@ -78,6 +94,7 @@ export class WriteExecutor {
   }
   async close() {
     this.closed = true;
+    for (const item of this.pending.values()) clearTimeout(item.timer);
     const thread = this.thread;
     if (thread) await thread.terminate();
   }
