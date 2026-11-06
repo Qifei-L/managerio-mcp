@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Script } from 'node:vm';
-import { loginPage, connectionsPage, mcpSettingsPage } from '../server/pages.mjs';
+import { loginPage, registerPage, connectionsPage, accountPage, adminPage, mcpSettingsPage } from '../server/pages.mjs';
 import { configuration, createApplication } from '../server/index.mjs';
 import { SqliteBucket } from '../server/storage.mjs';
 
@@ -121,7 +121,7 @@ test('dedicated browser login, protected pages, CSRF and session revocation', as
     assert.equal(good.status, 200);
     const value = good.headers.get('set-cookie');
     assert.match(value, /HttpOnly/);
-    assert.match(value, /SameSite=Strict/);
+    assert.match(value, /SameSite=Lax/);
     assert.match(value, /Max-Age=28800/);
     assert(!value.includes(token));
     const cookie = value.split(';')[0];
@@ -130,9 +130,9 @@ test('dedicated browser login, protected pages, CSRF and session revocation', as
     assert.equal(settingsResponse.status, 200);
     assert.equal(settingsResponse.headers.get('cache-control'), 'no-store');
     const settingsHtml = await settingsResponse.text();
-    assert(settingsHtml.includes(token));
+    assert(!settingsHtml.includes(token), 'the master credential is never rendered');
     assert(settingsHtml.includes(`${app.origin}/mcp`));
-    assert.match(settingsHtml, /Authorization: Bearer/);
+    assert.match(settingsHtml, /Personal access tokens/);
     const anonymousSettings = await fetch(`${app.origin}/mcp-settings`, { redirect: 'manual' });
     assert.equal(anonymousSettings.status, 303);
     assert.equal(anonymousSettings.headers.get('location'), '/login');
@@ -150,7 +150,7 @@ test('dedicated browser login, protected pages, CSRF and session revocation', as
     assert.equal((await fetch(`${app.origin}/api/connections`, { headers: { Cookie: cookie } })).status, 401);
     assert.equal((await fetch(`${app.origin}/mcp-settings`, { headers: { Cookie: cookie }, redirect: 'manual' })).status, 303);
     assert.equal((await fetch(`${app.origin}/api/connections`, { headers: { Cookie: 'evertrust_session=forged' } })).status, 401);
-    for (const markup of [loginPage, connectionsPage, settingsHtml]) new Script(markup.match(/<script>([\s\S]*?)<\/script>/)[1]);
+    for (const markup of [loginPage, registerPage, connectionsPage, accountPage, adminPage, settingsHtml]) new Script(markup.match(/<script>([\s\S]*?)<\/script>/)[1]);
   } finally { await app.shutdown(); rmSync(dir, { recursive: true, force: true }); }
 });
 
